@@ -1,9 +1,9 @@
 #!/usr/bin/env zsh
-# TODO colorize unread
-# TODO mark read using completion function
+# ~TODO make read stable with the previous unread~
+# INSTEAD make all reminders referrable by id
+#   TODO return an id the way mktemp does, when setting a reminder, also make read use this 
 # TODO periodic command
 # TODO update the prompt with an icon using the periodic command
-# TODO make read stable with the previous unread
 
 source color.zsh
 
@@ -13,13 +13,6 @@ delim=" :: "
 # FIXME - make it in the home dir
 reminders_file=.reminders
 read_reminders_file=.reminders-read
-
-function _in() {
-    local date_canonical="$(date --date="now + $date" +$DATE_FORMAT)"
-    local record=${date_canonical}${delim}${reminder}
-    echo $record >> $reminders_file
-    _sort $reminders_file
-}
 
 function set-reminder() {
     local relation="$1"
