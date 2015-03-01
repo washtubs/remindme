@@ -1,0 +1,61 @@
+#!/usr/bin/env zsh
+
+DATE_FORMAT="%Y-%m-%dT%H.%M.%S" # periods are git friendlier than colons
+delim=" :: "
+# FIXME - make it in the home dir
+reminders_file=.reminders
+read_reminders_file=.reminders-read
+
+case $1 in
+    "in")
+        _in()
+        shift
+        ;;
+    "at")
+        _at()
+        shift
+        ;;
+    *)
+        _at()
+esac
+
+
+funtion _parse-args() {
+    date=""
+    reminder=""
+    parsedate=true
+    for arg in $@; do
+        [[ $arg = "--" ]] \
+            parsedate=false
+        if { $parsedate }; then
+            date="${date}${arg}"
+        else
+            reminder="${reminder}${arg}"
+        fi
+    done
+}
+
+function _in() {
+    local date_canonical="$(date --date"now + $date" +$DATE_FORMAT)"
+    record=${date_canonical}${delim}${reminder}
+    echo $record >> $reminders_file
+    _sort $reminders_file
+}
+
+#inplace sort
+function _sort() {
+    local file=$1
+    [[ ! -e $file ]] && echo $file not found >&2
+    local tmp=$(mktemp)
+    sort -i $file > $tmp
+    mv $tmp $file
+}
+
+function read() {
+
+    _sort $read_reminders_file
+}
+
+function _get-due-unread() {
+    
+}
