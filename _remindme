@@ -1,0 +1,68 @@
+#compdef remindme
+
+#FIXME - make this completion function only work with the read action
+
+typeset -A opt_args
+
+_arguments -C \
+  '1:cmd:->cmds' \
+  '*:: :->args' \
+&& ret=0
+
+case "$state" in
+    (cmds)
+        local commands; 
+        commands=(
+            "mark-read" 
+            "show-unread"
+            "show-upcoming"
+            "in"
+            "at"
+        )
+        _describe -t commands 'command' commands && ret=0
+    ;;
+    (args)
+        case $line[1] in
+            read)
+                local reads; 
+                reads=("${(@f)$(_unread completer)}")
+                _describe -t reads 'read' reads && ret=0
+                ;;
+        esac
+  ;;
+  #(generator_lists)
+    #local generators; generators=(
+      #'controller:creates a new controller'
+      #'mailer:creates a new mailer'
+      #'migration:creates a new migration'
+      #'model:creates a new model'
+      #'project:create a new Padrino app'
+      #'plugin:add plugin to your app'
+    #)
+    #_describe -t generators 'generator' generators && ret=0
+  #;;
+  #(args)
+    #case $line[2] in
+      #(controller)
+        #_arguments \
+          #'-d:remove all generated files' \
+          #'-n:specify the application' \
+          #'-r:specify the root'
+          #ret=0
+      #;;
+      #(mailer)
+        #local mailers; mailers=(
+          #'-a:creates a mailer for the specified subapp'
+          #'-d:removes all generated files'
+          #'-n:specify the application'
+          #'-r:specify the root destination path'
+        #)
+        #_describe -t mailers 'mailer' mailers && ret=0
+      #;;
+      #...
+      #;;
+    #esac
+  #;;
+esac
+
+return 1
