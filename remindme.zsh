@@ -1,10 +1,5 @@
 #!/usr/bin/env zsh
-# ~TODO make read stable with the previous unread~
-# INSTEAD make all reminders referrable by id
-#   TODO return an id the way mktemp does, when setting a reminder, also make read use this 
-# TODO periodic command
-# TODO update the prompt with an icon using the periodic command
-# establish format for "read" file. include the time the reminder happened and the time it was read
+# TODO establish format for "read" file. include the time the reminder happened and the time it was read
 
 source color.zsh
 
@@ -13,15 +8,20 @@ DATE_FORMAT_VIEWED="%Y-%m-%dT%H.%M.%S" # periods are git friendlier than colons
 # standard string to indicate *unspecified*
 na="%%"
 delim=" :: "
-# FIXME - make it in the home dir
-reminders_file=.reminders
-new_reminders_file=.new-reminders
-read_reminders_file=.reminders-read
-reminder_data_dir=.reminders-data
+if (( $+REMINDME_TEST_MODE )); then
+    BASE_DIR=$DEV/remindme/remindme-test-data/.remindme
+else
+    BASE_DIR=$HOME/.remindme
+fi
+[[ ! -e $BASE_DIR ]] && mkdir -p $BASE_DIR
+reminders_file=$BASE_DIR/.reminders
+new_reminders_file=$BASE_DIR/.new-reminders
+read_reminders_file=$BASE_DIR/.reminders-read
+reminder_data_dir=$BASE_DIR/.reminders-data
 
 function _log() {
-    echo $@ >&2
-    #echo $@ >/dev/null
+    #echo $@ >&2
+    echo $@ >/dev/null
 }
 
 function _update-reminders() {
@@ -116,23 +116,16 @@ function _mark-read() {
     _sort $read_reminders_file
 }
 
-# at time of writing: this is only used in the context of deleting dummies
-function _delete-by-id() {
-    local id="$1"
-    [[ -z $id ]] && echo "invalid usage: no id" >&2
-    _log "deleting id $1..."
-    local tmp=$(mktemp)
-    awk -F"$delim" -vid="${id}" 'id!=$2{print}' $reminders_file > $tmp
-    mv $tmp $reminders_file
-    rm $reminder_data_dir/$dummy_id
+function _get-unread() {
+    local date_canonical="$(date --date="now" +$DATE_FORMAT)"
+    awk -F"$delim" -vOFS="$delim" -vdate="$date_canonical" \
+            'date < $1{ exit 0 } {print $1, $2}' \
+            "$reminders_file"
 }
 
 # TODO: tabularize show-unread with date DIFF after
 function _show-unread() {
     local printer="$1"
-    local date_canonical="$(date --date="now" +$DATE_FORMAT)"
-    local reminder="DUMMY"
-    local dummy_id="$(_put-record "${date_canonical}" "${reminder}")"
     while read line;
     do
         case $printer in
@@ -143,10 +136,7 @@ function _show-unread() {
                 _print-completer "$line"
                 ;;
         esac
-    done < <( awk -F"$delim" -vid="$dummy_id" -vOFS="$delim" \
-        '$2==id{ exit 0 } {print $1, $2}' \
-        $reminders_file )
-    _delete-by-id $dummy_id
+    done < <( _get-unread )
 }
 
 function _show-upcoming() {
@@ -154,7 +144,6 @@ function _show-upcoming() {
     [[ "$1" = "by" ]] && \
         shift && \
         abs=true
-
 }
 
 function _print-pretty() {
@@ -316,8 +305,6 @@ function _parse-reminder() {
     # trim that first space
     reminder=$(echo $reminder | sed 's/^\s//')
 
-
-
     if [ -z "$reminder" ]; then
         if $edit_mode; then
             reminder="${na}"
@@ -341,8 +328,40 @@ function _parse-reminder() {
     fi
 }
 
-function new-unread() {
-    comm -23 $reminders_file $new_reminders_file 
+function _new-unread() {
+    touch $new_reminders_file
+    local tmp=$(mktemp)
+    comm -23 <( _get-unread ) $new_reminders_file > $tmp
+    cat $tmp
+    cat $tmp >> $new_reminders_file
 }
 
+# periodic function just sets the variable for the shell to handle
+function _handle-new-unread() {
+    local new_unread
+    new_unread=( $(_new-unread) )
+    _old_RPROMPT=$RPROMPT
+    if [ ! -z "$new_unread" ]; then
+        RPROMPT="%{$fg_bold[yellow]%}[[ New reminder! ]]%{$color_reset%}"
+    fi
+}
+
+function _remove-reminder-flag() {
+    if (( $+_old_RPROMPT )); then
+        RPROMPT=$_old_RPROMPT
+        unset _old_RPROMPT
+    fi
+}
+
+[[ ! $+PERIOD ]] && PERIOD=10
+if ! (( $+_handle_new_unread_set )); then
+    periodic_functions+=( _handle-new-unread )
+fi
+if ! (( $+_remove_reminder_flag_set )); then
+    precmd_functions+=( _remove-reminder-flag )
+fi
+_handle_new_unread_set=true
+_remove_reminder_flag_set=true
+
 alias ur="remindme show-unread"
+alias mark="remindme mark-read"
