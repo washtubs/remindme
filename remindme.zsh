@@ -1,6 +1,11 @@
 #!/usr/bin/env zsh
 # TODO establish format for "read" file. include the time the reminder happened and the time it was read
 
+#
+# G l o b a l s / i m p o r t s 
+# @globals/imports
+# {{{
+
 source color.zsh
 
 DATE_FORMAT="%Y-%m-%dT%H:%M:%S" 
@@ -19,10 +24,85 @@ new_reminders_file=$BASE_DIR/.new-reminders
 read_reminders_file=$BASE_DIR/.reminders-read
 reminder_data_dir=$BASE_DIR/.reminders-data
 
+# }}}
+
+#
+# R e m i n d m e   t o p - l e v e l 
+# @toplevel
+# {{{
+
+function remindme() {
+    mkdir "$reminder_data_dir"
+    _parse-args $@
+}
+
+# }}}
+
+#
+# U t i l i t i e s 
+# @util
+# {{{
+
+#inplace sort
+function _sort() {
+    local file=$1
+    [[ ! -e $file ]] && echo $file not found >&2
+    local tmp=$(mktemp)
+    sort -i $file > $tmp
+    mv $tmp $file
+}
+
+function _smart-date-diff() {
+    d1=$(date -d "$1" +%s)
+    d2=$(date -d "$2" +%s)
+
+    local sorted_ary
+    local -A unsorted_map
+    sorted_ary=( years months weeks days hours minutes seconds )
+    unsorted_map=(
+        years $(( 2592000 * 12 ))
+        months $(( 86400 * 30 ))
+        weeks $(( 86400 * 7 ))
+        days $(( 3600 * 24 ))
+        hours $(( 60 * 60 ))
+        minutes 60
+        seconds 1
+    )
+
+    local index=1
+    local unit
+    while true; do
+        unit=$sorted_ary[$index]
+        local seconds_in_unit=$unsorted_map[$unit]
+        local value=$(( (d1 - d2) / $seconds_in_unit ))
+        if [ $seconds_in_unit = 1 ]; then
+            break
+        elif [ $value -gt 0 ]; then
+            break
+        elif [ $index -gt 7 ]; then
+            break
+        fi
+        (( index++ ))
+    done
+    echo $value $unit
+}
+
+function _date-convert() {
+    local date=$1
+    echo $(date --date="$date" +"$DATE_FORMAT_VIEWED")
+}
+
 function _log() {
     #echo $@ >&2
     echo $@ >/dev/null
 }
+
+# }}}
+
+#
+# S t a t e   m a n i p u l a t i o n 
+# @statemanipulation
+# {{{
 
 function _update-reminders() {
     for id in $_ids; do
@@ -51,15 +131,6 @@ function _set-reminder() {
             _put-record ${date_canonical} "${reminder}"
         fi
     fi
-}
-
-#inplace sort
-function _sort() {
-    local file=$1
-    [[ ! -e $file ]] && echo $file not found >&2
-    local tmp=$(mktemp)
-    sort -i $file > $tmp
-    mv $tmp $file
 }
 
 function _put-record() {
@@ -116,12 +187,26 @@ function _mark-read() {
     _sort $read_reminders_file
 }
 
+# }}}
+
+#
+# Q u e r y 
+# @query
+# {{{
+
 function _get-unread() {
     local date_canonical="$(date --date="now" +$DATE_FORMAT)"
     awk -F"$delim" -vOFS="$delim" -vdate="$date_canonical" \
             'date < $1{ exit 0 } {print $1, $2}' \
             "$reminders_file"
 }
+
+# }}}
+
+#
+# P r i n t i n g / r e p o r t i n g 
+# @printing/reporting
+# {{{
 
 # TODO: tabularize show-unread with date DIFF after
 function _show-unread() {
@@ -164,50 +249,14 @@ function _print-completer() {
     echo "+$id:$reminder ... @$(_date-convert "${date}")"
 }
 
-function _smart-date-diff() {
-    d1=$(date -d "$1" +%s)
-    d2=$(date -d "$2" +%s)
+# }}}
 
-    local sorted_ary
-    local -A unsorted_map
-    sorted_ary=( years months weeks days hours minutes seconds )
-    unsorted_map=(
-        years $(( 2592000 * 12 ))
-        months $(( 86400 * 30 ))
-        weeks $(( 86400 * 7 ))
-        days $(( 3600 * 24 ))
-        hours $(( 60 * 60 ))
-        minutes 60
-        seconds 1
-    )
-
-    local index=1
-    local unit
-    while true; do
-        unit=$sorted_ary[$index]
-        local seconds_in_unit=$unsorted_map[$unit]
-        local value=$(( (d1 - d2) / $seconds_in_unit ))
-        if [ $seconds_in_unit = 1 ]; then
-            break
-        elif [ $value -gt 0 ]; then
-            break
-        elif [ $index -gt 7 ]; then
-            break
-        fi
-        (( index++ ))
-    done
-    echo $value $unit
-}
-
-function _date-convert() {
-    local date=$1
-    echo $(date --date="$date" +"$DATE_FORMAT_VIEWED")
-}
-
-function remindme() {
-    mkdir "$reminder_data_dir"
-    _parse-args $@
-}
+#
+# C o m m a n d - l i n e   p a r s i n g 
+# @commandlineparsing
+# functions needed to parse the command-line. They also handle the overall
+# program flow
+# {{{
 
 # get all ids into global _ids array, and shift as you go
 function _parse-ids() {
@@ -328,6 +377,14 @@ function _parse-reminder() {
     fi
 }
 
+# }}}
+
+#
+# I n t e r a c t i v e   Z s h 
+# @interactivezsh
+# functions, hooks, and aliases which define the interactive experience
+# {{{
+
 function _new-unread() {
     touch $new_reminders_file
     local tmp=$(mktemp)
@@ -365,3 +422,5 @@ _remove_reminder_flag_set=true
 
 alias ur="remindme show-unread"
 alias mark="remindme mark-read"
+
+# }}}
