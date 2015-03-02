@@ -1,6 +1,39 @@
 #compdef remindme
 
 #FIXME - make this completion function only work with the read action
+#
+
+function _log-comp() {
+    echo "$@" >/dev/pts/9
+}
+
+function _u-reminder() {
+    local comp
+    comp=( "qq" "asdasd" )
+    _describe -t date 'date' comp && ret=0
+}
+
+function _comp-ids() {
+    local start_index=$1
+    shift
+    local ids
+    ids=( $@ )
+    local new; 
+    new=()
+    #for r in $new; do echo $r >/dev/pts/9 ; done
+    for i in $ids; do
+        local match=false
+        for index in {${start_index}..${#line}} ; do
+            local current_id=$line[$index]
+            # if no match, then fail (exit 1) and keep element
+            echo $i | awk -F: -vcurrent_id=$current_id '$1!=current_id{exit 1}' &&
+                match=true
+            $match && break
+        done
+        $match || new+="$i"
+    done
+    _describe -t ids 'read' new && ret=0
+}
 
 typeset -A opt_args
 
@@ -13,23 +46,40 @@ case "$state" in
     (cmds)
         local commands; 
         commands=(
+            "in"
+            "at"
+            "update"
             "mark-read" 
             "show-unread"
             "show-upcoming"
-            "in"
-            "at"
         )
         _describe -t commands 'command' commands && ret=0
     ;;
+
     (args)
         case $line[1] in
-            read)
-                local reads; 
-                reads=("${(@f)$(_unread completer)}")
-                _describe -t reads 'read' reads && ret=0
+            mark-read)
+                unreads=("${(@f)$(_show-unread completer)}")
+                _comp-ids 2 $unreads
+                ;;
+            update)
+                case "$line[${#line}]" in
+                    "in")
+                        _u-reminder
+                        ;;
+                    *)
+                        unreads=("${(@f)$(_show-unread completer)}")
+                        _comp-ids 2 $unreads
+                        ;;
+                esac
                 ;;
         esac
   ;;
+
+  (update)
+      _u-reminder
+      ;;
+
   #(generator_lists)
     #local generators; generators=(
       #'controller:creates a new controller'

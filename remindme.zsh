@@ -4,24 +4,53 @@
 #   TODO return an id the way mktemp does, when setting a reminder, also make read use this 
 # TODO periodic command
 # TODO update the prompt with an icon using the periodic command
+# establish format for "read" file. include the time the reminder happened and the time it was read
 
 source color.zsh
 
 DATE_FORMAT="%Y-%m-%dT%H:%M:%S" 
 DATE_FORMAT_VIEWED="%Y-%m-%dT%H.%M.%S" # periods are git friendlier than colons
+# standard string to indicate *unspecified*
+na="%%"
 delim=" :: "
 # FIXME - make it in the home dir
 reminders_file=.reminders
+new_reminders_file=.new-reminders
 read_reminders_file=.reminders-read
+reminder_data_dir=.reminders-data
 
-function set-reminder() {
-    local relation="$1"
+function _log() {
+    echo $@ >&2
+    #echo $@ >/dev/null
+}
+
+function _update-reminders() {
+    for id in $_ids; do
+        _set-reminder $id
+    done
+}
+
+function _set-reminder() {
+    local relation="$_relation"
     local date_prepend=""
     [[ relation = "relative" ]] && date_prepend="now + "
     local date_canonical="$(date --date="${date_prepend}${date}" +$DATE_FORMAT)"
-    local record=${date_canonical}${delim}${reminder}
-    echo $record >> $reminders_file
-    _sort $reminders_file
+    local id=$1
+    if $_edit_mode; then
+        if [ -z $id ]; then
+            log "edit mode is set. an id was expected."
+            return 1
+        else
+            _update-reminder ${date_canonical} "${reminder}" $id
+        fi
+    else
+        if [ ! -z $id ]; then
+            log "edit mode is not set. id unexpected."
+            return 1
+        else
+            _put-record ${date_canonical} "${reminder}"
+        fi
+    fi
 }
 
 #inplace sort
@@ -33,22 +62,69 @@ function _sort() {
     mv $tmp $file
 }
 
+function _put-record() {
+    local date=$1
+    local reminder=$2
+    local id
+    if [ ! -z $3 ]; then
+        id=$3
+    else
+        if { cd $reminder_data_dir &>/dev/null }; then
+            id=$(mktemp XXXXX)
+            _log "new record $id"
+            echo $reminder > ${id}
+            cd - &>/dev/null
+        fi
+    fi
+    local record=${date}${delim}${id}
+    echo $record >> $reminders_file
+    _sort $reminders_file
+    echo $id
+}
+
+#updating a date means marking it read
+function _update-reminder() {
+    local date=$1
+    local reminder=$2
+    local id=$3
+    [[ $# != 3 ]] && echo "invalid usage" && return 1 
+    [[ $reminder != "${na}" ]] && \
+        echo $reminder > $reminder_data_dir/$id
+    if [ $date != "${na}" ]; then
+        _mark-read $id
+        #re-put the file, the reminder will be ignored
+        _put-record $date -- $id
+    fi
+}
+
 function _mark-read-multi() {
-    for arg in $@; do
-        _mark-read $arg
+    local id
+    for id in $_ids; do
+        _mark-read $id
     done
 }
 
 function _mark-read() {
-    number=$1
-    [[ -z $number ]] && \
-        echo "Invalid ref: $number." >&2 && \
+    id=$1
+    [[ -z $id ]] && \
+        echo "No ref given." >&2 && \
         return 1
     local tmp=$(mktemp)
-    awk -vnumber=$number \
-        'NR!=number{print} NR==number{print >> "'"$read_reminders_file"'"}' $reminders_file > $tmp
+    awk -vid=${id} -F"${delim}"\
+        '$2!=id{print} $2==id{print >> "'"$read_reminders_file"'"}' $reminders_file > $tmp
     mv $tmp $reminders_file
     _sort $read_reminders_file
+}
+
+# at time of writing: this is only used in the context of deleting dummies
+function _delete-by-id() {
+    local id="$1"
+    [[ -z $id ]] && echo "invalid usage: no id" >&2
+    _log "deleting id $1..."
+    local tmp=$(mktemp)
+    awk -F"$delim" -vid="${id}" 'id!=$2{print}' $reminders_file > $tmp
+    mv $tmp $reminders_file
+    rm $reminder_data_dir/$dummy_id
 }
 
 # TODO: tabularize show-unread with date DIFF after
@@ -56,10 +132,7 @@ function _show-unread() {
     local printer="$1"
     local date_canonical="$(date --date="now" +$DATE_FORMAT)"
     local reminder="DUMMY"
-    local record=${date_canonical}${delim}${reminder}
-    echo $record >> $reminders_file
-    _sort $reminders_file
-    # FIXME: make stable
+    local dummy_id="$(_put-record "${date_canonical}" "${reminder}")"
     while read line;
     do
         case $printer in
@@ -70,13 +143,10 @@ function _show-unread() {
                 _print-completer "$line"
                 ;;
         esac
-        #echo "${linenum} - ${reminder}|${datediff} ago"
-    done < <( awk -F"$delim" -vrec="$record" -vOFS="$delim" \
-        '$0==rec{ exit 0 } {print NR, $1, $2}' \
+    done < <( awk -F"$delim" -vid="$dummy_id" -vOFS="$delim" \
+        '$2==id{ exit 0 } {print $1, $2}' \
         $reminders_file )
-    local tmp=$(mktemp)
-    awk -vrec="$record" '$0!=rec{ print }' $reminders_file > $tmp
-    mv $tmp $reminders_file
+    _delete-by-id $dummy_id
 }
 
 function _show-upcoming() {
@@ -89,20 +159,20 @@ function _show-upcoming() {
 
 function _print-pretty() {
     local line="$1"
-    local linenum="$(echo $line | awk -F"$delim" '{print $1}')"
-    local date="$(echo $line | awk -F"$delim" '{print $2}')"
-    local reminder="$(echo $line | awk -F"$delim" '{print $3}')"
+    local date="$(echo $line | awk -F"$delim" '{print $1}')"
+    local id="$(echo $line | awk -F"$delim" '{print $2}')"
+    local reminder="$(cat ${reminder_data_dir}/${id})"
     local datediff="$(_smart-date-diff "now" "$date")"
-    echo "$(color -b)${linenum}$(color) $(color black)-$(color) $reminder$(color blue) ... $(color -b)$datediff ago$(color)"
+    echo "$(color -b)${id}$(color) $(color black)-$(color) $reminder$(color blue) ... $(color -b)$datediff ago$(color)"
 }
 
 function _print-completer() {
     #TODO: disambiguate
     local line="$1"
-    local linenum="$(echo $line | awk -F"$delim" '{print $1}')"
-    local date="$(echo $line | awk -F"$delim" '{print $2}')"
-    local reminder="$(echo $line | awk -F"$delim" '{print $3}')"
-    echo "$linenum:$reminder @$(_date-convert "${date}")"
+    local date="$(echo $line | awk -F"$delim" '{print $1}')"
+    local id="$(echo $line | awk -F"$delim" '{print $2}')"
+    local reminder="$(cat ${reminder_data_dir}/${id})"
+    echo "+$id:$reminder ... @$(_date-convert "${date}")"
 }
 
 function _smart-date-diff() {
@@ -146,18 +216,49 @@ function _date-convert() {
 }
 
 function remindme() {
+    mkdir "$reminder_data_dir"
+    _parse-args $@
+}
 
+# get all ids into global _ids array, and shift as you go
+function _parse-ids() {
+    _ids=()
+    while true; do
+        case $1 in
+            +*) # identifier
+                # parse all identifiers at the beginning
+                _ids+=$(echo $1 | sed 's/^+//')
+                shift
+                continue
+                ;;
+        esac
+        break
+    done
+    echo $@
+}
+
+function _parse-args() {
+
+    _edit_mode=false
     case "$1" in
         "in")
-            relation="in"
             shift
+            _relation="relative"
+            _parse-reminder $@
             ;;
         "at")
-            relation="at"
             shift
+            _relation="absolute"
+            _parse-reminder $@
             ;;
         "show-unread")
             _show-unread pretty
+            return 0
+            ;;
+        "mark-read")
+            shift
+            _parse-ids $@ &>/dev/null
+            _mark-read-multi
             return 0
             ;;
         "show-upcoming")
@@ -165,16 +266,39 @@ function remindme() {
             _show-upcoming
             return 0
             ;;
-        "read")
+        "update")
             shift
-            _mark-read-multi $@
-            return 0
+            _edit_mode=true
+            # this is the only argument that requires a second pass
+            local t=$(mktemp)
+            _parse-ids $@ > $t
+            new_args=($(cat $t))
+            rm $t
+            case $new_args[1] in
+                "in")
+                    _relation="relative"
+                    shift
+                    _parse-reminder $new_args[2,-1]
+                    ;;
+                "at")
+                    _relation="absolute"
+                    shift
+                    _parse-reminder $new_args[2,-1]
+                    ;;
+                *)
+                    _relation="absolute"
+                    _parse-reminder $new_args[2,-1]
+                    ;;
+            esac
             ;;
         *)
-            relation="at"
+            _relation="absolute"
+            _parse-reminder $@
             ;;
     esac
+}
 
+function _parse-reminder() {
     date=""
     reminder=""
     parsedate=true
@@ -183,7 +307,7 @@ function remindme() {
             parsedate=false && \
             continue
         if { $parsedate }; then
-            date="${date}${arg}"
+            date="${date} ${arg}"
         else
             reminder="${reminder} ${arg}"
         fi
@@ -192,15 +316,33 @@ function remindme() {
     # trim that first space
     reminder=$(echo $reminder | sed 's/^\s//')
 
-    [[ -z "$reminder" ]] &&
-        echo "Please specify a reminder after \"--\""
+
+
+    if [ -z "$reminder" ]; then
+        if $edit_mode; then
+            reminder="${na}"
+        else
+            echo "Please specify a reminder after \"--\"" >&2
+        fi
+    fi
 
     local date_prepend=""
-    [[ relation = "relative" ]] && date_prepend="now + "
+    [[ $_relation = "relative" ]] && date_prepend="now + "
 
     { date --date="${date_prepend}${date}" &>/dev/null } || \
-        { echo "unix date didn't like your date string: \"now + $date\"."; \
+        { echo "unix date didn't like your date string: \"${date_prepend}$date\"."; \
             return 1 }
     
-    set-reminder $relation
+    if $_edit_mode; then
+        _log edit mode enabled
+        _update-reminders
+    else
+        _set-reminder
+    fi
 }
+
+function new-unread() {
+    comm -23 $reminders_file $new_reminders_file 
+}
+
+alias ur="remindme show-unread"
