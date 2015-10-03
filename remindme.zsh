@@ -7,6 +7,7 @@
 # {{{
 
 DATE_FORMAT="%Y-%m-%dT%H:%M:%S" 
+DATE_FORMAT_AT="%Y%m%d%H%M.%S" 
 DATE_FORMAT_VIEWED="%Y-%m-%dT%H.%M.%S" # periods are git friendlier than colons
 # standard string to indicate *unspecified*
 na="%%"
@@ -139,6 +140,7 @@ function _set-reminder() {
     local date_prepend=""
     [[ relation = "relative" ]] && date_prepend="now + "
     local date_canonical="$(date --date="${date_prepend}${date}" +$DATE_FORMAT)"
+    local date_at="$(date --date="${date_prepend}${date}" +$DATE_FORMAT_AT)"
     local id=$1
     if $_edit_mode; then
         if [ -z $id ]; then
@@ -153,6 +155,7 @@ function _set-reminder() {
             return 1
         else
             _put-record ${date_canonical} "${reminder}"
+            echo "notify '${reminder}'" | at -t ${date_at} 
         fi
     fi
 }
